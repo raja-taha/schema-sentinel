@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 
 from app.api.deps import ApiKey, DbSession
 from app.core.config import get_settings
@@ -13,8 +13,16 @@ from app.schemas.analysis import (
     ScenarioOut,
 )
 from app.services import analysis_service
-from app.services.github_service import conclusion_from_risk, post_pr_comment
+from app.services.db_stats import resolve_table_stats
+from app.services.github_service import (
+    collect_pr_migrations,
+    conclusion_from_risk,
+    create_check_run,
+    post_pr_comment,
+)
+from app.services.parser import detect_source_type
 from app.services.redis_state import get_analysis_progress
+from app.services.samples import list_sample_migrations, load_sample_migration
 from app.services.scenarios import list_scenarios
 
 router = APIRouter()
@@ -31,9 +39,30 @@ async def health():
     )
 
 
+@router.get("/stats")
+async def table_stats(_: ApiKey):
+    """Live (or synthetic) table size metadata used for lock-risk scoring."""
+    return resolve_table_stats()
+
+
 @router.get("/scenarios", response_model=list[ScenarioOut])
 async def scenarios(_: ApiKey):
+    """Curated eval scenarios (kept for evals/CI). Prefer /samples for browsing."""
     return list_scenarios()
+
+
+@router.get("/samples")
+async def samples(_: ApiKey):
+    """All migration files under samples/migrations (dynamically discovered)."""
+    return list_sample_migrations()
+
+
+@router.get("/samples/{filename}")
+async def sample_detail(filename: str, _: ApiKey):
+    try:
+        return load_sample_migration(filename)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/analyses", response_model=list[AnalysisSummary])
@@ -52,6 +81,7 @@ async def create_analysis(payload: AnalysisCreate, session: DbSession, _: ApiKey
             migration_filename=payload.migration_filename,
             source_type=payload.source_type,
             scenario_id=payload.scenario_id,
+            sample_filename=payload.sample_filename,
             repo_path=payload.repo_path,
             auto_analyze=payload.auto_analyze,
         )
@@ -59,6 +89,38 @@ async def create_analysis(payload: AnalysisCreate, session: DbSession, _: ApiKey
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return analysis
+
+
+@router.post("/analyses/upload", response_model=AnalysisDetail, status_code=status.HTTP_201_CREATED)
+async def upload_migration(
+    session: DbSession,
+    _: ApiKey,
+    file: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    auto_analyze: bool = Form(default=True),
+):
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be UTF-8 text (SQL / Alembic / Django / Prisma)",
+        ) from exc
+    if not content.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+    filename = file.filename or "upload.sql"
+    source_type = detect_source_type(content, filename=filename)
+    analysis = await analysis_service.create_analysis(
+        session,
+        title=title or filename,
+        migration_sql=content,
+        migration_filename=filename,
+        source_type=source_type,
+        auto_analyze=auto_analyze,
+    )
     return analysis
 
 
@@ -99,7 +161,7 @@ async def progress(analysis_id: UUID, _: ApiKey):
 
 @router.post("/webhooks/github")
 async def github_webhook(request: Request, session: DbSession):
-    """PR webhook → analyze migration files → optional PR comment."""
+    """PR webhook → fetch migration files from GitHub → analyze → comment/check."""
     body = await request.body()
     sig = request.headers.get("X-Hub-Signature-256")
     if not verify_github_signature(body, sig):
@@ -113,47 +175,89 @@ async def github_webhook(request: Request, session: DbSession):
     if action not in {"opened", "synchronize", "reopened"} or not pr:
         return {"ok": True, "skipped": True, "reason": "irrelevant_event"}
 
-    # Without fetching PR files via GitHub API, accept optional inline migration in payload (demo)
+    repo_full_name = repo.get("full_name")
+    pr_number = pr.get("number")
+    head = pr.get("head") or {}
+    head_sha = head.get("sha")
+    title = f"PR #{pr_number}: {pr.get('title') or 'migration check'}"
+
+    # Allow inline SQL for local demos; otherwise fetch real PR files
     migration_sql = (payload.get("migration_sql") or "").strip()
-    title = f"PR #{pr.get('number')}: {pr.get('title') or 'migration check'}"
+    source_type = payload.get("source_type") or "sql"
+    migration_filename = payload.get("migration_filename")
+    fetched: dict = {}
+
+    if not migration_sql and repo_full_name and pr_number:
+        fetched = await collect_pr_migrations(
+            repo_full_name=repo_full_name,
+            pr_number=int(pr_number),
+            head_sha=head_sha,
+        )
+        migration_sql = fetched.get("migration_sql") or ""
+        source_type = fetched.get("source_type") or source_type
+        filenames = fetched.get("filenames") or []
+        migration_filename = filenames[0] if filenames else migration_filename
 
     if not migration_sql:
         return {
             "ok": True,
             "skipped": True,
-            "reason": "no_migration_sql_in_payload",
-            "hint": "For local demos, include migration_sql in the webhook JSON body.",
+            "reason": "no_migration_files",
+            "hint": (
+                "Set GITHUB_TOKEN so SchemaSentinel can list PR files, "
+                "or include migration_sql in the webhook body for local demos."
+            ),
+            "pr_file_count": fetched.get("pr_file_count", 0),
         }
 
     analysis = await analysis_service.create_analysis(
         session,
         title=title,
         migration_sql=migration_sql,
-        source_type=payload.get("source_type") or "sql",
-        migration_filename=payload.get("migration_filename"),
+        source_type=source_type,
+        migration_filename=migration_filename,
         auto_analyze=True,
+        github_meta={
+            "repo": repo_full_name,
+            "pr_number": pr_number,
+            "head_sha": head_sha,
+            "files": fetched.get("files") or [],
+        },
     )
 
     settings = get_settings()
+    conclusion = conclusion_from_risk(analysis.overall_risk or "low")
     github_meta = {
-        "repo": repo.get("full_name"),
-        "pr_number": pr.get("number"),
-        "conclusion": conclusion_from_risk(analysis.overall_risk or "low"),
+        "repo": repo_full_name,
+        "pr_number": pr_number,
+        "head_sha": head_sha,
+        "conclusion": conclusion,
         "check_name": settings.github_check_name,
+        "files": fetched.get("files") or [],
     }
 
-    comment = None
-    if settings.github_token and repo.get("full_name") and pr.get("number"):
-        body_md = analysis.markdown_report or analysis.llm_explanation or "SchemaSentinel analysis complete."
-        # Keep comment reasonably sized
-        if len(body_md) > 60000:
-            body_md = body_md[:60000] + "\n\n_(truncated)_"
-        comment = await post_pr_comment(
-            repo_full_name=repo["full_name"],
-            pr_number=int(pr["number"]),
+    body_md = (
+        analysis.markdown_report
+        or analysis.llm_explanation
+        or "SchemaSentinel analysis complete."
+    )
+    if len(body_md) > 60000:
+        body_md = body_md[:60000] + "\n\n_(truncated)_"
+
+    if settings.github_token and repo_full_name and pr_number:
+        github_meta["comment"] = await post_pr_comment(
+            repo_full_name=repo_full_name,
+            pr_number=int(pr_number),
             body=body_md,
         )
-        github_meta["comment"] = comment
+        if head_sha:
+            github_meta["check_run"] = await create_check_run(
+                repo_full_name=repo_full_name,
+                head_sha=head_sha,
+                conclusion=conclusion,
+                title=f"Risk: {analysis.overall_risk} ({analysis.overall_score})",
+                summary=body_md[:65000],
+            )
 
     analysis.github_meta = github_meta
     await session.commit()
@@ -163,6 +267,7 @@ async def github_webhook(request: Request, session: DbSession):
         "ok": True,
         "analysis_id": str(analysis.id),
         "overall_risk": analysis.overall_risk,
-        "conclusion": github_meta["conclusion"],
+        "conclusion": conclusion,
+        "files_analyzed": fetched.get("filenames") or ([migration_filename] if migration_filename else []),
         "github": github_meta,
     }

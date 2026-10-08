@@ -69,6 +69,12 @@ export default function AnalysisPage() {
             {data.source_type}
             {data.migration_filename ? ` · ${data.migration_filename}` : ""} · score{" "}
             {data.overall_score?.toFixed(2) ?? "—"}
+            {data.dependency_graph?.stats_source
+              ? ` · stats ${data.dependency_graph.stats_source}`
+              : ""}
+            {data.dependency_graph?.stats_host
+              ? ` (${data.dependency_graph.stats_host})`
+              : ""}
           </p>
         </div>
         <div className="flex items-center gap-3">

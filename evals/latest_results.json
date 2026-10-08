@@ -2,8 +2,8 @@
   "passed": 6,
   "total": 6,
   "accuracy": 1.0,
-  "total_latency_ms": 912.29,
-  "avg_latency_ms": 152.05,
+  "total_latency_ms": 702.91,
+  "avg_latency_ms": 117.15,
   "results": [
     {
       "id": "drop-not-null-users",
@@ -14,7 +14,7 @@
         "R04_ADD_NOT_NULL_NO_DEFAULT"
       ],
       "code_refs": 2,
-      "latency_ms": 858.1,
+      "latency_ms": 649.95,
       "checks": {
         "risk_ok": true,
         "rules_ok": true,
@@ -31,7 +31,7 @@
         "R02_DROP_COLUMN"
       ],
       "code_refs": 10,
-      "latency_ms": 9.78,
+      "latency_ms": 8.15,
       "checks": {
         "risk_ok": true,
         "rules_ok": true,
@@ -48,7 +48,7 @@
         "R08_NONCONCURRENT_INDEX"
       ],
       "code_refs": 2,
-      "latency_ms": 7.0,
+      "latency_ms": 9.8,
       "checks": {
         "risk_ok": true,
         "rules_ok": true,
@@ -65,7 +65,7 @@
         "R06_RENAME_COLUMN"
       ],
       "code_refs": 4,
-      "latency_ms": 11.96,
+      "latency_ms": 10.99,
       "checks": {
         "risk_ok": true,
         "rules_ok": true,
@@ -82,7 +82,7 @@
         "R05_TYPE_NARROWING"
       ],
       "code_refs": 3,
-      "latency_ms": 7.68,
+      "latency_ms": 8.19,
       "checks": {
         "risk_ok": true,
         "rules_ok": true,
@@ -99,7 +99,7 @@
         "R00_NO_MATCH"
       ],
       "code_refs": 0,
-      "latency_ms": 9.6,
+      "latency_ms": 7.21,
       "checks": {
         "risk_ok": true,
         "rules_ok": true,

@@ -79,8 +79,9 @@ python scripts/seed_demo.py drop-column-orders --sync
 - Deterministic severities — LLM explanation cannot raise/lower rule scores
 - Audit trail (`audit_logs`) for create / complete / fail
 - Agent traces persisted on each analysis
-- OpenAI optional — mock reasoner keeps demos and CI green
-- Known limitation: live `TARGET_DATABASE_URL` stats and full PR file fetch are stubs; synthetic stats + sample app code are the supported happy path
+- OpenAI used when `OPENAI_API_KEY` is set (`AGENT_MODE=auto`); otherwise a deterministic mock briefing
+- Live table stats from `TARGET_DATABASE_URL` (falls back to synthetic estimates on connection failure)
+- GitHub webhooks fetch real PR migration files when `GITHUB_TOKEN` is set; post PR comments + check runs
 
 ---
 
@@ -208,15 +209,14 @@ schema-sentinel/
 ## Tradeoffs
 
 - **No Neo4j** — NetworkX in-process is enough for MVP blast radius and keeps Docker light.
-- **Regex + SQLGlot, not full tree-sitter** — covers the portfolio signal for ORM/SQL parsing without native grammar packaging pain on Windows.
-- **GitHub PR file fetch** — webhook demo accepts inline `migration_sql`; production would list PR files via the GitHub API.
+- **Regex + SQLGlot, not full tree-sitter** — covers ORM/SQL parsing without native grammar packaging pain on Windows.
 - **Frontend is a reviewer console**, not a design-system playground — time went into the parser/rules/graph path.
+- **Demo app tables** (`users`, `orders`, …) are seeded into the SchemaSentinel DB so local `TARGET_DATABASE_URL` has real `pg_class` stats. Point it at your real app DB in production.
 
 ---
 
 ## Roadmap
 
-- Live `pg_stat` / table size ingestion via `TARGET_DATABASE_URL`
 - Query-log impact hints (which endpoints hit affected tables most)
 - Shadow migration dry-run against a clone database
 - Schema-version compatibility simulation across N app releases

@@ -38,6 +38,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://sentinel:sentinel@db:5432/schemasentinel
       DATABASE_URL_SYNC: postgresql://sentinel:sentinel@db:5432/schemasentinel
       REDIS_URL: redis://redis:6379/0
+      # Inside Compose, reach Postgres via service name (overrides host localhost in .env)
+      TARGET_DATABASE_URL: postgresql://sentinel:sentinel@db:5432/schemasentinel
     ports:
       - "8000:8000"
     depends_on:
@@ -64,6 +66,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://sentinel:sentinel@db:5432/schemasentinel
       DATABASE_URL_SYNC: postgresql://sentinel:sentinel@db:5432/schemasentinel
       REDIS_URL: redis://redis:6379/0
+      TARGET_DATABASE_URL: postgresql://sentinel:sentinel@db:5432/schemasentinel
     depends_on:
       db:
         condition: service_healthy

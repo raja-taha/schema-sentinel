@@ -11,8 +11,13 @@ class AnalysisCreate(BaseModel):
         default=None, description="Raw SQL / Alembic / Prisma / Django migration content"
     )
     migration_filename: str | None = None
-    source_type: str = Field(default="sql", description="sql | alembic | prisma | django")
-    scenario_id: str | None = Field(default=None, description="Use a built-in sample scenario")
+    source_type: str = Field(
+        default="auto", description="auto | sql | alembic | prisma | django"
+    )
+    scenario_id: str | None = Field(default=None, description="Legacy curated scenario id")
+    sample_filename: str | None = Field(
+        default=None, description="Load a file from samples/migrations by filename"
+    )
     repo_path: str | None = Field(default=None, description="Optional path for code-reference search")
     auto_analyze: bool = True
 

@@ -40,8 +40,9 @@ Migration parser (SQLGlot + Alembic/Prisma/Django extractors)
 
 1. **Rules before LLM** — severities come only from deterministic rules; the model explains, it does not re-score.
 2. **Honest rollbacks** — drops and narrowing type changes are marked irreversible; we never pretend every DDL is undoable.
-3. **Synthetic table stats** — lock risk uses seeded row estimates (`users`, `orders`, `payments`, …) so demos work without a prod DB. Optional `TARGET_DATABASE_URL` is reserved for live stats.
-4. **Offline-friendly** — `AGENT_MODE=mock` (or empty `OPENAI_API_KEY`) keeps CI and local demos green.
+3. **Live table stats** — when `TARGET_DATABASE_URL` is set, lock risk uses `pg_class` row estimates + relation sizes; falls back to synthetic defaults on failure.
+4. **Offline-friendly evals** — CI/evals force mock LLM + synthetic stats so they stay deterministic without network.
+5. **GitHub PR fetch** — webhook lists PR files via the GitHub API, downloads migration contents, analyzes, then comments + creates a check run.
 
 ## Data model
 

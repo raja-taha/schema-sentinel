@@ -1,4 +1,4 @@
-"""Orchestrate parse → graph → rules → code search → reasoner → report."""
+"""Orchestrate parse → live stats → graph → rules → code search → reasoner → report."""
 
 from __future__ import annotations
 
@@ -13,12 +13,15 @@ from app.agents.workflow import run_reasoner
 from app.core.logging import get_logger
 from app.models.analysis import Analysis, AnalysisStatus, AuditLog
 from app.services.code_search import search_references
+from app.services.db_stats import resolve_table_stats
 from app.services.dependency_graph import build_dependency_graph
 from app.services.parser import parse_migration
 from app.services.redis_state import set_analysis_progress
 from app.services.report import render_markdown_report
 from app.services.risk_engine import score_operations
 from app.services.rollout import build_rollout_plan, generate_rollback_sql
+from app.services.parser import detect_source_type
+from app.services.samples import load_sample_migration
 from app.services.scenarios import (
     default_repo_path,
     default_table_stats,
@@ -29,7 +32,12 @@ from app.services.scenarios import (
 logger = get_logger("analysis_service")
 
 
-async def audit(session: AsyncSession, action: str, analysis_id: UUID | None = None, detail: dict | None = None) -> None:
+async def audit(
+    session: AsyncSession,
+    action: str,
+    analysis_id: UUID | None = None,
+    detail: dict | None = None,
+) -> None:
     session.add(AuditLog(analysis_id=analysis_id, action=action, detail=detail or {}))
 
 
@@ -39,10 +47,12 @@ async def create_analysis(
     title: str | None = None,
     migration_sql: str | None = None,
     migration_filename: str | None = None,
-    source_type: str = "sql",
+    source_type: str = "auto",
     scenario_id: str | None = None,
+    sample_filename: str | None = None,
     repo_path: str | None = None,
     auto_analyze: bool = True,
+    github_meta: dict[str, Any] | None = None,
 ) -> Analysis:
     if scenario_id:
         content, scenario = load_scenario_sql(scenario_id)
@@ -52,8 +62,24 @@ async def create_analysis(
         title = title or scenario["title"]
         if not repo_path:
             repo_path = str(default_repo_path())
+    elif sample_filename:
+        sample = load_sample_migration(sample_filename)
+        migration_sql = sample["migration_sql"]
+        migration_filename = sample["filename"]
+        source_type = sample["source_type"]
+        title = title or sample["filename"]
+        if not repo_path:
+            repo_path = str(default_repo_path())
     elif not migration_sql:
-        raise ValueError("Provide migration_sql or scenario_id")
+        raise ValueError("Provide migration_sql, sample_filename, or scenario_id")
+
+    if source_type in {"auto", ""}:
+        source_type = detect_source_type(
+            migration_sql or "", filename=migration_filename, hint=None
+        )
+
+    if not repo_path:
+        repo_path = str(default_repo_path())
 
     analysis = Analysis(
         title=title or migration_filename or "Untitled migration analysis",
@@ -63,6 +89,7 @@ async def create_analysis(
         migration_sql=migration_sql or "",
         migration_filename=migration_filename,
         repo_path=repo_path,
+        github_meta=github_meta,
     )
     session.add(analysis)
     await session.flush()
@@ -103,9 +130,13 @@ async def run_analysis(session: AsyncSession, analysis_id: UUID) -> Analysis:
             source_type=analysis.source_type,
             filename=analysis.migration_filename,
         )
-        await set_analysis_progress(str(analysis_id), {"stage": "risk_rules", "pct": 35})
+        await set_analysis_progress(str(analysis_id), {"stage": "db_stats", "pct": 25})
 
-        scored = score_operations(operations, default_table_stats())
+        stats_payload = resolve_table_stats()
+        table_rows = stats_payload.get("rows") or default_table_stats()
+
+        await set_analysis_progress(str(analysis_id), {"stage": "risk_rules", "pct": 40})
+        scored = score_operations(operations, table_rows)
         findings = scored["findings"]
         overall_risk = scored["overall_risk"]
         overall_score = scored["overall_score"]
@@ -127,6 +158,12 @@ async def run_analysis(session: AsyncSession, analysis_id: UUID) -> Analysis:
             code_references=code_refs,
             overall_risk=overall_risk,
             overall_score=overall_score,
+            stats_meta={
+                "source": stats_payload.get("source"),
+                "url_host": stats_payload.get("url_host"),
+                "table_count": len(stats_payload.get("details") or []),
+                "error": stats_payload.get("error"),
+            },
         )
 
         report = render_markdown_report(
@@ -140,7 +177,14 @@ async def run_analysis(session: AsyncSession, analysis_id: UUID) -> Analysis:
             rollout_plan=rollout,
             rollback_sql=rollback,
             llm_explanation=reasoner["explanation"],
+            stats_meta={
+                "source": stats_payload.get("source"),
+                "url_host": stats_payload.get("url_host"),
+            },
         )
+
+        # Attach stats provenance onto dependency graph for the UI
+        graph = {**graph, "stats_source": stats_payload.get("source"), "stats_host": stats_payload.get("url_host")}
 
         analysis.operations = operations
         analysis.risk_findings = findings
@@ -160,12 +204,22 @@ async def run_analysis(session: AsyncSession, analysis_id: UUID) -> Analysis:
             session,
             "analysis.completed",
             analysis.id,
-            {"overall_risk": overall_risk, "findings": len(findings)},
+            {
+                "overall_risk": overall_risk,
+                "findings": len(findings),
+                "stats_source": stats_payload.get("source"),
+            },
         )
         await session.commit()
         await session.refresh(analysis)
         await set_analysis_progress(str(analysis_id), {"stage": "done", "pct": 100})
-        logger.info("analysis_completed", id=str(analysis_id), risk=overall_risk)
+        logger.info(
+            "analysis_completed",
+            id=str(analysis_id),
+            risk=overall_risk,
+            stats_source=stats_payload.get("source"),
+            llm=reasoner["trace"],
+        )
         return analysis
 
     except Exception as exc:
@@ -175,7 +229,9 @@ async def run_analysis(session: AsyncSession, analysis_id: UUID) -> Analysis:
         await audit(session, "analysis.failed", analysis.id, {"error": str(exc)})
         await session.commit()
         await session.refresh(analysis)
-        await set_analysis_progress(str(analysis_id), {"stage": "failed", "pct": 100, "error": str(exc)})
+        await set_analysis_progress(
+            str(analysis_id), {"stage": "failed", "pct": 100, "error": str(exc)}
+        )
         return analysis
 
 
@@ -186,10 +242,19 @@ def analyze_sync(
     filename: str | None = None,
     repo_path: str | None = None,
     title: str = "sync-analysis",
+    use_live_stats: bool = False,
 ) -> dict[str, Any]:
-    """Pure sync pipeline for tests/evals (no DB)."""
+    """Pure sync pipeline for tests/evals (no app DB writes)."""
     operations = parse_migration(migration_sql, source_type=source_type, filename=filename)
-    scored = score_operations(operations, default_table_stats())
+    if use_live_stats:
+        stats_payload = resolve_table_stats()
+        table_rows = stats_payload.get("rows") or default_table_stats()
+    else:
+        # Deterministic evals/CI — avoid network dependency
+        stats_payload = {"source": "synthetic", "url_host": None, "error": None}
+        table_rows = default_table_stats()
+
+    scored = score_operations(operations, table_rows)
     code_refs = search_references(operations, repo_path or default_repo_path())
     graph = build_dependency_graph(operations, code_refs)
     rollout = build_rollout_plan(operations, scored["findings"])
@@ -201,6 +266,11 @@ def analyze_sync(
         code_references=code_refs,
         overall_risk=scored["overall_risk"],
         overall_score=scored["overall_score"],
+        stats_meta={
+            "source": stats_payload.get("source"),
+            "url_host": stats_payload.get("url_host"),
+        },
+        force_mock=not use_live_stats,
     )
     report = render_markdown_report(
         title=title,
@@ -213,6 +283,10 @@ def analyze_sync(
         rollout_plan=rollout,
         rollback_sql=rollback,
         llm_explanation=reasoner["explanation"],
+        stats_meta={
+            "source": stats_payload.get("source"),
+            "url_host": stats_payload.get("url_host"),
+        },
     )
     return {
         "operations": operations,
@@ -226,5 +300,6 @@ def analyze_sync(
         "llm_explanation": reasoner["explanation"],
         "agent_trace": reasoner["trace"],
         "markdown_report": report,
+        "stats": stats_payload,
         "scenario": get_scenario(title) if False else None,
     }

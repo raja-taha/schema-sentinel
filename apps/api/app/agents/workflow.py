@@ -1,4 +1,4 @@
-"""LangGraph LLM reasoner over deterministic risk findings (with mock fallback)."""
+"""LangGraph LLM reasoner over deterministic risk findings (OpenAI when configured)."""
 
 from __future__ import annotations
 
@@ -23,10 +23,17 @@ def _mock_explanation(state: ReasonerState) -> str:
         if refs
         else "No application references were indexed for this run."
     )
+    stats = state.get("stats_meta") or {}
+    stats_note = (
+        f"Table stats source: **{stats.get('source', 'unknown')}**"
+        + (f" (`{stats.get('url_host')}`)" if stats.get("url_host") else "")
+        + "."
+    )
     return (
         f"### Reviewer briefing\n\n"
         f"Overall risk is **{state.get('overall_risk')}** "
         f"(score `{state.get('overall_score')}`).\n\n"
+        f"{stats_note}\n\n"
         f"{ref_note}\n\n"
         f"#### Top findings\n{bullets or '- None'}\n\n"
         f"#### Guidance\n"
@@ -37,28 +44,43 @@ def _mock_explanation(state: ReasonerState) -> str:
 
 
 def _openai_explanation(state: ReasonerState) -> str:
-    from langchain_openai import ChatOpenAI
     from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_openai import ChatOpenAI
 
     settings = get_settings()
-    llm = ChatOpenAI(model=settings.openai_model, api_key=settings.openai_api_key, temperature=0.2)
+    llm = ChatOpenAI(
+        model=settings.openai_model,
+        api_key=settings.openai_api_key,
+        temperature=0.2,
+        timeout=60,
+        max_retries=2,
+    )
 
     ops_summary = ", ".join(
-        f"{o.get('op_type')}({o.get('table')}.{o.get('column')})" for o in (state.get("operations") or [])[:12]
+        f"{o.get('op_type')}({o.get('table')}.{o.get('column')})"
+        for o in (state.get("operations") or [])[:12]
     )
     findings_summary = "\n".join(
         f"- [{f.get('severity')}] {f.get('rule_id')}: {f.get('message')}"
         for f in (state.get("findings") or [])[:8]
     )
+    refs = state.get("code_references") or []
+    ref_summary = "\n".join(
+        f"- `{r.get('path')}:{r.get('line')}` ({r.get('symbol')})" for r in refs[:8]
+    )
+    stats = state.get("stats_meta") or {}
+
     prompt = (
         f"Migration: {state.get('title')}\n"
         f"Overall risk: {state.get('overall_risk')} ({state.get('overall_score')})\n"
+        f"Table stats: source={stats.get('source')} host={stats.get('url_host')}\n"
         f"Operations: {ops_summary}\n"
         f"Findings:\n{findings_summary}\n"
-        f"Code refs: {len(state.get('code_references') or [])}\n\n"
+        f"Code refs ({len(refs)}):\n{ref_summary or '- none'}\n\n"
         "Write a concise PR review comment (markdown) covering: blast radius, "
         "why rules fired, expand/backfill/switch/contract advice, and what is NOT safely reversible. "
-        "Do not invent tables that were not provided. Be skeptical of perfect rollbacks."
+        "Do not invent tables that were not provided. Be skeptical of perfect rollbacks. "
+        "Never change or contradict the deterministic overall risk score."
     )
     messages = [
         SystemMessage(
@@ -81,8 +103,10 @@ def run_reasoner(
     code_references: list[dict[str, Any]],
     overall_risk: str,
     overall_score: float,
+    stats_meta: dict[str, Any] | None = None,
+    force_mock: bool = False,
 ) -> dict[str, Any]:
-    """Run LLM or mock reasoner. Returns explanation + trace."""
+    """Run OpenAI reasoner when configured; otherwise deterministic mock briefing."""
     settings = get_settings()
     state: ReasonerState = {
         "title": title,
@@ -91,16 +115,28 @@ def run_reasoner(
         "code_references": code_references,
         "overall_risk": overall_risk,
         "overall_score": overall_score,
+        "stats_meta": stats_meta or {},
         "trace": [],
     }
 
+    use_openai = (not force_mock) and settings.use_openai
     trace: list[dict[str, Any]] = [
         {"step": "ingest", "detail": f"{len(operations)} ops, {len(findings)} findings"},
-        {"step": "mode", "detail": "openai" if settings.use_openai else "mock"},
+        {
+            "step": "mode",
+            "detail": "openai" if use_openai else "mock",
+            "agent_mode": settings.agent_mode,
+            "has_api_key": bool(settings.openai_api_key),
+        },
+        {
+            "step": "stats",
+            "detail": (stats_meta or {}).get("source"),
+            "host": (stats_meta or {}).get("url_host"),
+        },
     ]
 
     try:
-        if settings.use_openai:
+        if use_openai:
             explanation = _openai_explanation(state)
             trace.append({"step": "llm_reasoner", "detail": "openai_completed"})
         else:
@@ -111,14 +147,13 @@ def run_reasoner(
         explanation = _mock_explanation(state)
         trace.append({"step": "llm_reasoner", "detail": f"fallback_mock:{exc}"})
 
-    # Lightweight LangGraph-shaped pipeline for portfolio signal
     try:
         from langgraph.graph import END, StateGraph
 
         def node_summarize(s: ReasonerState) -> ReasonerState:
-            s = dict(s)
-            s["explanation"] = explanation
-            return s  # type: ignore[return-value]
+            out = dict(s)
+            out["explanation"] = explanation
+            return out  # type: ignore[return-value]
 
         graph = StateGraph(ReasonerState)
         graph.add_node("summarize", node_summarize)

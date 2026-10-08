@@ -44,6 +44,16 @@
             ],
             "url": "{{baseUrl}}/api/v1/scenarios"
           }
+        },
+        {
+          "name": "Live Table Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/stats"
+          }
         }
       ]
     },

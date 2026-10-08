@@ -17,7 +17,13 @@ def render_markdown_report(
     rollout_plan: list[dict[str, Any]],
     rollback_sql: str,
     llm_explanation: str | None,
+    stats_meta: dict[str, Any] | None = None,
 ) -> str:
+    stats_meta = stats_meta or {}
+    stats_line = f"- Table stats: **{stats_meta.get('source', 'synthetic')}**"
+    if stats_meta.get("url_host"):
+        stats_line += f" (`{stats_meta['url_host']}`)"
+
     lines = [
         f"# SchemaSentinel Risk Report — {title}",
         "",
@@ -31,6 +37,7 @@ def render_markdown_report(
         f"- Risk findings: **{len(findings)}**",
         f"- Code references: **{len(code_references)}**",
         f"- Graph nodes: **{dependency_graph.get('stats', {}).get('node_count', 0)}**",
+        stats_line,
         "",
         "## Parsed operations",
         "",

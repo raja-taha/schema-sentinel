@@ -8,5 +8,6 @@ class ReasonerState(TypedDict, total=False):
     code_references: list[dict[str, Any]]
     overall_risk: str
     overall_score: float
+    stats_meta: dict[str, Any]
     explanation: str
     trace: list[dict[str, Any]]
