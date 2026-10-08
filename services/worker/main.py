@@ -7,10 +7,27 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
-# Allow importing the API package when run as `python /worker/main.py`
-API_ROOT = Path(__file__).resolve().parents[2] / "apps" / "api"
-if str(API_ROOT) not in sys.path:
-    sys.path.insert(0, str(API_ROOT))
+# Allow importing the API package:
+# - Docker: API code is at /app (same image), worker script at /worker/main.py
+# - Local:  .../schema-sentinel/services/worker/main.py → ../../apps/api
+_HERE = Path(__file__).resolve()
+_API_CANDIDATES = [
+    Path("/app"),
+    Path.cwd(),
+]
+try:
+    _API_CANDIDATES.append(_HERE.parents[2] / "apps" / "api")
+except IndexError:
+    pass
+try:
+    _API_CANDIDATES.append(_HERE.parents[1].parent / "apps" / "api")
+except IndexError:
+    pass
+
+for _root in _API_CANDIDATES:
+    if (_root / "app").is_dir() and str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+        break
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger

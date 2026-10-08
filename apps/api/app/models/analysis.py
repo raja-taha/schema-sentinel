@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -75,6 +75,6 @@ class TableStat(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     schema_name: Mapped[str] = mapped_column(String(128), nullable=False, default="public")
     table_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    row_estimate: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    row_estimate: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     has_indexes: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

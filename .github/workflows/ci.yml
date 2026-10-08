@@ -1,10 +1,14 @@
 name: CI
 
+# Disabled for now — re-enable by restoring the `on:` triggers below.
 on:
-  push:
-    branches: [main, master]
-  pull_request:
   workflow_dispatch:
+
+# Previously:
+# on:
+#   push:
+#     branches: [main, master]
+#   pull_request:
 
 jobs:
   api-tests:

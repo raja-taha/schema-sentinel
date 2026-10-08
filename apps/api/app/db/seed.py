@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.logging import configure_logging, get_logger
 from app.core.config import get_settings
@@ -16,9 +16,32 @@ from app.services.scenarios import default_table_stats
 logger = get_logger("seed")
 
 
+async def _ensure_table_stats_bigint(conn) -> None:
+    """Widen size_bytes/row_estimate if an older INTEGER schema already exists."""
+    await conn.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'table_stats' AND column_name = 'size_bytes'
+                  AND data_type = 'integer'
+              ) THEN
+                ALTER TABLE table_stats
+                  ALTER COLUMN size_bytes TYPE BIGINT,
+                  ALTER COLUMN row_estimate TYPE BIGINT;
+              END IF;
+            END $$;
+            """
+        )
+    )
+
+
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _ensure_table_stats_bigint(conn)
     await seed_table_stats()
 
 

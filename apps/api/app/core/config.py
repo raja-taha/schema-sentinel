@@ -4,12 +4,43 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_ENV_CANDIDATES = (
+
+def _discover_repo_root() -> Path:
+    """Find repo root locally, or fall back safely inside Docker (/app)."""
+    here = Path(__file__).resolve()
+    # Local: .../schema-sentinel/apps/api/app/core/config.py → parents[4]
+    # Docker: /app/app/core/config.py → parents only go to /
+    for candidate in [here, *here.parents]:
+        if (candidate / "samples").is_dir() and (
+            (candidate / "docker-compose.yml").is_file()
+            or (candidate / "apps" / "api").is_dir()
+        ):
+            return candidate
+    # Docker API image: code lives at /app, samples mounted at /samples
+    if Path("/samples").is_dir():
+        return Path("/")
+    # Prefer /app when running the API container
+    if Path("/app/app").is_dir():
+        return Path("/app")
+    # Safe fallback: apps/api (parents[2]) when deep parents don't exist
+    try:
+        return here.parents[4]
+    except IndexError:
+        try:
+            return here.parents[2]
+        except IndexError:
+            return Path.cwd()
+
+
+_REPO_ROOT = _discover_repo_root()
+_HERE = Path(__file__).resolve()
+_ENV_CANDIDATES = [
     Path.cwd() / ".env",
     _REPO_ROOT / ".env",
-    Path(__file__).resolve().parents[2] / ".env",
-)
+    Path("/app") / ".env",
+]
+if len(_HERE.parents) > 2:
+    _ENV_CANDIDATES.append(_HERE.parents[2] / ".env")  # apps/api/.env locally
 _ENV_FILE = next((p for p in _ENV_CANDIDATES if p.is_file()), _REPO_ROOT / ".env")
 
 
@@ -72,6 +103,13 @@ class Settings(BaseSettings):
 
     @property
     def samples_dir(self) -> Path:
+        for candidate in (
+            _REPO_ROOT / "samples",
+            Path("/samples"),
+            Path.cwd() / "samples",
+        ):
+            if candidate.is_dir():
+                return candidate
         return _REPO_ROOT / "samples"
 
 
