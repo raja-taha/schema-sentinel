@@ -1,0 +1,111 @@
+{
+  "passed": 6,
+  "total": 6,
+  "accuracy": 1.0,
+  "total_latency_ms": 912.29,
+  "avg_latency_ms": 152.05,
+  "results": [
+    {
+      "id": "drop-not-null-users",
+      "ok": true,
+      "overall_risk": "critical",
+      "overall_score": 0.92,
+      "rules_fired": [
+        "R04_ADD_NOT_NULL_NO_DEFAULT"
+      ],
+      "code_refs": 2,
+      "latency_ms": 858.1,
+      "checks": {
+        "risk_ok": true,
+        "rules_ok": true,
+        "refs_ok": true,
+        "score_ok": true
+      }
+    },
+    {
+      "id": "drop-column-orders",
+      "ok": true,
+      "overall_risk": "critical",
+      "overall_score": 0.94,
+      "rules_fired": [
+        "R02_DROP_COLUMN"
+      ],
+      "code_refs": 10,
+      "latency_ms": 9.78,
+      "checks": {
+        "risk_ok": true,
+        "rules_ok": true,
+        "refs_ok": true,
+        "score_ok": true
+      }
+    },
+    {
+      "id": "nonconcurrent-index",
+      "ok": true,
+      "overall_risk": "critical",
+      "overall_score": 0.875,
+      "rules_fired": [
+        "R08_NONCONCURRENT_INDEX"
+      ],
+      "code_refs": 2,
+      "latency_ms": 7.0,
+      "checks": {
+        "risk_ok": true,
+        "rules_ok": true,
+        "refs_ok": true,
+        "score_ok": true
+      }
+    },
+    {
+      "id": "rename-column-alembic",
+      "ok": true,
+      "overall_risk": "high",
+      "overall_score": 0.72,
+      "rules_fired": [
+        "R06_RENAME_COLUMN"
+      ],
+      "code_refs": 4,
+      "latency_ms": 11.96,
+      "checks": {
+        "risk_ok": true,
+        "rules_ok": true,
+        "refs_ok": true,
+        "score_ok": true
+      }
+    },
+    {
+      "id": "type-narrowing",
+      "ok": true,
+      "overall_risk": "critical",
+      "overall_score": 0.9,
+      "rules_fired": [
+        "R05_TYPE_NARROWING"
+      ],
+      "code_refs": 3,
+      "latency_ms": 7.68,
+      "checks": {
+        "risk_ok": true,
+        "rules_ok": true,
+        "refs_ok": true,
+        "score_ok": true
+      }
+    },
+    {
+      "id": "safe-add-nullable",
+      "ok": true,
+      "overall_risk": "low",
+      "overall_score": 0.15,
+      "rules_fired": [
+        "R00_NO_MATCH"
+      ],
+      "code_refs": 0,
+      "latency_ms": 9.6,
+      "checks": {
+        "risk_ok": true,
+        "rules_ok": true,
+        "refs_ok": true,
+        "score_ok": true
+      }
+    }
+  ]
+}

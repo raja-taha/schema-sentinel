@@ -1,0 +1,184 @@
+{
+  "info": {
+    "_postman_id": "b2c3d4e5-f6a7-8901-sche-masentinel01",
+    "name": "SchemaSentinel API",
+    "description": "SchemaSentinel — Database Migration Risk Analyzer.\n\nSet collection variables `baseUrl` and `apiKey` before running.\nTypical flow: Health → List Scenarios → Create Analysis (scenario) → Get Analysis → Get Report → GitHub Webhook (demo).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "apiKey", "value": "change-me-to-a-strong-secret" },
+    { "key": "analysisId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Root",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/"
+          }
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scenarios",
+      "item": [
+        {
+          "name": "List Scenarios",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/scenarios"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analyses",
+      "item": [
+        {
+          "name": "List Analyses",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/analyses"
+          }
+        },
+        {
+          "name": "Create Analysis (NOT NULL scenario)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json();",
+                  "  pm.collectionVariables.set('analysisId', data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scenario_id\": \"drop-not-null-users\",\n  \"auto_analyze\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/analyses"
+          }
+        },
+        {
+          "name": "Create Analysis (Paste SQL)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json();",
+                  "  pm.collectionVariables.set('analysisId', data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Custom drop column\",\n  \"source_type\": \"sql\",\n  \"migration_sql\": \"ALTER TABLE orders DROP COLUMN status;\",\n  \"auto_analyze\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/analyses"
+          }
+        },
+        {
+          "name": "Get Analysis",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/analyses/{{analysisId}}"
+          }
+        },
+        {
+          "name": "Get Markdown Report",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/analyses/{{analysisId}}/report"
+          }
+        },
+        {
+          "name": "Re-run Analysis",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/analyses/{{analysisId}}/rerun"
+          }
+        },
+        {
+          "name": "Get Progress",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-API-Key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/analyses/{{analysisId}}/progress"
+          }
+        }
+      ]
+    },
+    {
+      "name": "GitHub Webhook",
+      "item": [
+        {
+          "name": "PR Webhook (demo with inline SQL)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Hub-Signature-256", "value": "", "disabled": true }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"opened\",\n  \"pull_request\": {\n    \"number\": 42,\n    \"title\": \"Add NOT NULL email\"\n  },\n  \"repository\": {\n    \"full_name\": \"acme/demo-api\"\n  },\n  \"source_type\": \"sql\",\n  \"migration_filename\": \"001_add_email.sql\",\n  \"migration_sql\": \"ALTER TABLE users ADD COLUMN email varchar(255) NOT NULL;\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/webhooks/github"
+          }
+        }
+      ]
+    }
+  ]
+}

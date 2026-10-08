@@ -1,0 +1,34 @@
+[
+  {
+    "id": "drop-not-null-users",
+    "expected_risk": ["critical", "high"],
+    "must_include_rules": ["R04_ADD_NOT_NULL_NO_DEFAULT"]
+  },
+  {
+    "id": "drop-column-orders",
+    "expected_risk": ["critical", "high"],
+    "must_include_rules": ["R02_DROP_COLUMN"],
+    "min_code_refs": 1
+  },
+  {
+    "id": "nonconcurrent-index",
+    "expected_risk": ["medium", "high", "critical"],
+    "must_include_rules": ["R08_NONCONCURRENT_INDEX"]
+  },
+  {
+    "id": "rename-column-alembic",
+    "expected_risk": ["high", "critical"],
+    "must_include_rules": ["R06_RENAME_COLUMN"]
+  },
+  {
+    "id": "type-narrowing",
+    "expected_risk": ["critical", "high"],
+    "must_include_rules": ["R05_TYPE_CHANGE", "R05_TYPE_NARROWING"]
+  },
+  {
+    "id": "safe-add-nullable",
+    "expected_risk": ["low", "medium"],
+    "must_include_rules": [],
+    "max_score": 0.7
+  }
+]
